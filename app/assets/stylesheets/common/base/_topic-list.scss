@@ -1,7 +1,10 @@
 .show-more {
-  position: absolute;
-  top: 4px;
   width: 100%;
+  z-index: 1;
+  &.has-topics {
+    position: absolute;
+    top: 7px;
+  }
 }
 
 .list-controls {
@@ -13,22 +16,25 @@
   }
 }
 
+html.anon .topic-list a.title:visited:not(.badge-notification) {color: dark-light-diff($primary, $secondary, 45%, -30%);}
+.topic-list a.title.visited:not(.badge-notification) {color: dark-light-diff($primary, $secondary, 45%, -30%);}
+
 .topic-list {
   width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  border-top: 1px solid dark-light-diff($primary, $secondary, 90%, -75%);
-  background: rgba($secondary, .8);
+  border-collapse: collapse;
+
+
 
   > tbody > tr {
-
-    &.archived a {
-      opacity: 0.6;
-    }
     &.has-excerpt .star {
       vertical-align: top;
       margin-top: 2px;
     }
+    border-bottom: 1px solid dark-light-diff($primary, $secondary, 90%, -75%);
+  }
+
+  > tbody > tr:first-of-type {
+    border-top: 3px solid dark-light-diff($primary, $secondary, 90%, -75%);
   }
 
   th,
@@ -99,10 +105,6 @@
     }
   }
 
-  td.category a {
-    max-width:150px;
-  }
-
 }
 
 
@@ -111,7 +113,6 @@
   .category .badge-notification {
     background-color:transparent;
     color: scale-color($primary, $lightness: 50%);
-    position: inherit;
   }
 
   .subcategories .badge {
@@ -156,24 +157,6 @@
     margin-left: 8px;
   }
 
-  .badge-category {
-    padding: 4px 10px;
-    display: inline-block;
-    margin-bottom: 10px;
-  }
-
-  .category-dropdown-menu .badge-category {
-    width: 100%;
-  }
-  .category-dropdown-button {
-    font-size: 1.143em;
-    width: 10px;
-    text-align: center;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
   clear: both;
 }
 
@@ -213,19 +196,19 @@ ol.category-breadcrumb {
     float: left;
     margin-right: 5px;
   }
+
+  .bread-crumbs-right-outlet {
+    float: left;
+  }
 }
 
 .list-controls .category-dropdown-menu {
   overflow-x: hidden;
   overflow-y: auto;
   position: absolute;
-  border: 1px solid scale-color-diff();
+  border: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
   background-color: $secondary;
   z-index: 100;
-
-  .cat {
-    margin-right: 20px;
-  }
 
   a.badge-category, a.badge-category-parent {
     line-height: 19px;
@@ -252,11 +235,19 @@ ol.category-breadcrumb {
 }
 
 .period-chooser {
-
+  display: inline-block;
   @include unselectable;
 
   h2 {
     float: left;
+    margin: 5px 0 10px;
+
+    .top-date-string {
+      color: scale-color($primary, $lightness: 60%);
+      font-weight: normal;
+      font-size: 0.7em;
+      text-transform: uppercase;
+    }
   }
 
   button {
@@ -271,7 +262,7 @@ ol.category-breadcrumb {
 
     @include unselectable;
 
-    border: 1px solid scale-color-diff();
+    border: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
     padding: 5px;
     background: $secondary;
     position: absolute;
@@ -300,6 +291,10 @@ ol.category-breadcrumb {
 
 .top-title-buttons {
   display: inline;
+
+  button {
+    margin-right: 0.5em;
+  }
 }
 
 div.education {

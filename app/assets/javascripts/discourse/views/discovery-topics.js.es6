@@ -1,12 +1,12 @@
 import UrlRefresh from 'discourse/mixins/url-refresh';
 import LoadMore from "discourse/mixins/load-more";
 
-export default Discourse.View.extend(LoadMore, UrlRefresh, {
+export default Ember.View.extend(LoadMore, UrlRefresh, {
   eyelineSelector: '.topic-list-item',
 
   actions: {
     loadMore() {
-      var self = this;
+      const self = this;
       Discourse.notifyTitle(0);
       this.get('controller').loadMoreTopics().then(function (hasMoreResults) {
         Em.run.schedule('afterRender', function() {
@@ -20,7 +20,7 @@ export default Discourse.View.extend(LoadMore, UrlRefresh, {
   },
 
   _readjustScrollPosition: function() {
-    var scrollTo = this.session.get('topicListScrollPosition');
+    const scrollTo = this.session.get('topicListScrollPosition');
 
     if (typeof scrollTo !== "undefined") {
       Em.run.schedule('afterRender', function() {

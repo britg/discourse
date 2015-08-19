@@ -1,23 +1,31 @@
-var DAY = 60 * 50 * 1000;
+import ScreenTrack from 'discourse/lib/screen-track';
+import { number } from 'discourse/lib/formatter';
+import DiscourseURL from 'discourse/lib/url';
 
-var PostView = Discourse.GroupedView.extend(Ember.Evented, {
+const DAY = 60 * 50 * 1000;
+
+const PostView = Discourse.GroupedView.extend(Ember.Evented, {
   classNames: ['topic-post', 'clearfix'],
-  templateName: 'post',
-  classNameBindings: ['postTypeClass',
+  classNameBindings: ['needsModeratorClass:moderator:regular',
                       'selected',
                       'post.hidden:post-hidden',
-                      'post.deleted',
+                      'post.deleted:deleted',
                       'post.topicOwner:topic-owner',
                       'groupNameClass',
                       'post.wiki:wiki'],
-  postBinding: 'content',
+
+  post: Ember.computed.alias('content'),
+
+  templateName: function() {
+    return (this.get('post.post_type') === this.site.get('post_types.small_action')) ? 'post-small-action' : 'post';
+  }.property('post.post_type'),
 
   historyHeat: function() {
-    var updatedAt = this.get('post.updated_at');
+    const updatedAt = this.get('post.updated_at');
     if (!updatedAt) { return; }
 
     // Show heat on age
-    var rightNow = new Date().getTime(),
+    const rightNow = new Date().getTime(),
         updatedAtDate = new Date(updatedAt).getTime();
 
     if (updatedAtDate > (rightNow - DAY * Discourse.SiteSettings.history_hours_low)) return 'heatmap-high';
@@ -25,12 +33,13 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
     if (updatedAtDate > (rightNow - DAY * Discourse.SiteSettings.history_hours_high)) return 'heatmap-low';
   }.property('post.updated_at'),
 
-  postTypeClass: function() {
-    return this.get('post.post_type') === Discourse.Site.currentProp('post_types.moderator_action') ? 'moderator' : 'regular';
+  needsModeratorClass: function() {
+    return (this.get('post.post_type') === this.site.get('post_types.moderator_action')) ||
+           (this.get('post.topic.is_warning') && this.get('post.firstPost'));
   }.property('post.post_type'),
 
   groupNameClass: function() {
-    var primaryGroupName = this.get('post.primary_group_name');
+    const primaryGroupName = this.get('post.primary_group_name');
     if (primaryGroupName) {
       return "group-" + primaryGroupName;
     }
@@ -39,7 +48,7 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
   showExpandButton: function() {
     if (this.get('controller.firstPostExpanded')) { return false; }
 
-    var post = this.get('post');
+    const post = this.get('post');
     return post.get('post_number') === 1 && post.get('topic.expandable_first_post');
   }.property('post.post_number', 'controller.firstPostExpanded'),
 
@@ -75,14 +84,14 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
   repliesShown: Em.computed.gt('post.replies.length', 0),
 
   _updateQuoteElements($aside, desc) {
-    var navLink = "",
-        quoteTitle = I18n.t("post.follow_quote"),
-        postNumber = $aside.data('post');
+    let navLink = "";
+    const quoteTitle = I18n.t("post.follow_quote"),
+          postNumber = $aside.data('post');
 
     if (postNumber) {
 
       // If we have a topic reference
-      var topicId, topic;
+      let topicId, topic;
       if (topicId = $aside.data('topic')) {
         topic = this.get('controller.content');
 
@@ -100,7 +109,7 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
       }
     }
     // Only add the expand/contract control if it's not a full post
-    var expandContract = "";
+    let expandContract = "";
     if (!$aside.data('full')) {
       expandContract = "<i class='fa fa-" + desc + "' title='" + I18n.t("post.expand_collapse") + "'></i>";
       $('.title', $aside).css('cursor', 'pointer');
@@ -114,7 +123,7 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
 
     $aside.data('expanded', !$aside.data('expanded'));
 
-    var self = this,
+    const self = this,
         finished = function() {
           self.set('expanding', false);
         };
@@ -122,23 +131,23 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
     if ($aside.data('expanded')) {
       this._updateQuoteElements($aside, 'chevron-up');
       // Show expanded quote
-      var $blockQuote = $('blockquote', $aside);
+      const $blockQuote = $('blockquote', $aside);
       $aside.data('original-contents',$blockQuote.html());
 
-      var originalText = $blockQuote.text().trim();
+      const originalText = $blockQuote.text().trim();
       $blockQuote.html(I18n.t("loading"));
-      var topicId = this.get('post.topic_id');
+      let topicId = this.get('post.topic_id');
       if ($aside.data('topic')) {
         topicId = $aside.data('topic');
       }
 
-      var postId = parseInt($aside.data('post'), 10);
+      const postId = parseInt($aside.data('post'), 10);
       topicId = parseInt(topicId, 10);
 
       Discourse.ajax("/posts/by_number/" + topicId + "/" + postId).then(function (result) {
         // slightly double escape the cooked html to prevent jQuery from unescaping it
-        var escaped = result.cooked.replace("&", "&amp;");
-        var parsed = $(escaped);
+        const escaped = result.cooked.replace("&", "&amp;");
+        const parsed = $(escaped);
         parsed.replaceText(originalText, "<span class='highlighted'>" + originalText + "</span>");
         $blockQuote.showHtml(parsed, 'fast', finished);
       });
@@ -173,7 +182,7 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
           // don't display badge counts on category badge & oneboxes (unless when explicitely stated)
           if ($link.hasClass("track-link") ||
               $link.closest('.badge-category,.onebox-result,.onebox-body').length === 0) {
-            $link.append("<span class='badge badge-notification clicks' title='" + I18n.t("topic_map.clicks", {count: lc.clicks}) + "'>" + Discourse.Formatter.number(lc.clicks) + "</span>");
+            $link.append("<span class='badge badge-notification clicks' title='" + I18n.t("topic_map.clicks", {count: lc.clicks}) + "'>" + number(lc.clicks) + "</span>");
           }
         }
       });
@@ -183,21 +192,20 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
   actions: {
     // Toggle the replies this post is a reply to
     toggleReplyHistory(post) {
-
-      var replyHistory = post.get('replyHistory'),
-          topicController = this.get('controller'),
-          origScrollTop = $(window).scrollTop(),
-          replyPostNumber = this.get('post.reply_to_post_number'),
-          postNumber = this.get('post.post_number'),
-          self = this;
+      const replyHistory = post.get('replyHistory'),
+            topicController = this.get('controller'),
+            origScrollTop = $(window).scrollTop(),
+            replyPostNumber = this.get('post.reply_to_post_number'),
+            postNumber = this.get('post.post_number'),
+            self = this;
 
       if (Discourse.Mobile.mobileView) {
-        Discourse.URL.routeTo(this.get('post.topic').urlForPostNumber(replyPostNumber));
+        DiscourseURL.routeTo(this.get('post.topic').urlForPostNumber(replyPostNumber));
         return;
       }
 
-      var stream = topicController.get('postStream');
-      var offsetFromTop = this.$().position().top - $(window).scrollTop();
+      const stream = topicController.get('model.postStream');
+      const offsetFromTop = this.$().position().top - $(window).scrollTop();
 
       if(Discourse.SiteSettings.experimental_reply_expansion) {
         if(postNumber - replyPostNumber > 1) {
@@ -212,7 +220,7 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
       }
 
       if (replyHistory.length > 0) {
-        var origHeight = this.$('.embedded-posts.top').height();
+        const origHeight = this.$('.embedded-posts.top').height();
 
         replyHistory.clear();
         Em.run.next(function() {
@@ -221,7 +229,7 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
       } else {
         post.set('loadingReplyHistory', true);
 
-        topicController.get('postStream').findReplyHistory(post).then(function () {
+        stream.findReplyHistory(post).then(function () {
           post.set('loadingReplyHistory', false);
 
           Em.run.next(function() {
@@ -234,22 +242,22 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
 
   // Add the quote controls to a post
   _insertQuoteControls() {
-    var self = this,
+    const self = this,
         $quotes = this.$('aside.quote');
 
     // Safety check - in some cases with cloackedView this seems to be `undefined`.
     if (Em.isEmpty($quotes)) { return; }
 
     $quotes.each(function(i, e) {
-      var $aside = $(e);
+      const $aside = $(e);
       if ($aside.data('post')) {
         self._updateQuoteElements($aside, 'chevron-down');
-        var $title = $('.title', $aside);
+        const $title = $('.title', $aside);
 
         // Unless it's a full quote, allow click to expand
         if (!($aside.data('full') || $title.data('has-quote-controls'))) {
-          $title.on('click', function(e) {
-            if ($(e.target).is('a')) return true;
+          $title.on('click', function(e2) {
+            if ($(e2.target).is('a')) return true;
             self._toggleQuote($aside);
           });
           $title.data('has-quote-controls', true);
@@ -259,17 +267,16 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
   },
 
   _destroyedPostView: function() {
-    Discourse.ScreenTrack.current().stopTracking(this.get('elementId'));
+    ScreenTrack.current().stopTracking(this.get('elementId'));
   }.on('willDestroyElement'),
 
   _postViewInserted: function() {
-    var $post = this.$(),
-        post = this.get('post'),
-        postNumber = post.get('post_number');
+    const $post = this.$(),
+          postNumber = this.get('post').get('post_number');
 
     this._showLinkCounts();
 
-    Discourse.ScreenTrack.current().track(this.$().prop('id'), postNumber);
+    ScreenTrack.current().track($post.prop('id'), postNumber);
 
     this.trigger('postViewInserted', $post);
 
@@ -279,9 +286,36 @@ var PostView = Discourse.GroupedView.extend(Ember.Evented, {
     this._applySearchHighlight();
   }.on('didInsertElement'),
 
+  _fixImageSizes: function(){
+    var maxWidth;
+    this.$('img:not(.avatar)').each(function(idx,img){
+
+      // deferring work only for posts with images
+      // we got to use screen here, cause nothing is rendered yet.
+      // long term we may want to allow for weird margins that are enforced, instead of hardcoding at 70/20
+      maxWidth = maxWidth || $(window).width() - (Discourse.Mobile.mobileView ? 20 : 70);
+      if (Discourse.SiteSettings.max_image_width < maxWidth) {
+        maxWidth = Discourse.SiteSettings.max_image_width;
+      }
+
+      var aspect = img.height / img.width;
+      if (img.width > maxWidth) {
+        img.width = maxWidth;
+        img.height = parseInt(maxWidth * aspect,10);
+      }
+
+      // very unlikely but lets fix this too
+      if (img.height > Discourse.SiteSettings.max_image_height) {
+        img.height = Discourse.SiteSettings.max_image_height;
+        img.width = parseInt(maxWidth / aspect,10);
+      }
+
+    });
+  }.on('willInsertElement'),
+
   _applySearchHighlight: function() {
-    var highlight = this.get('controller.searchHighlight');
-    var cooked = this.$('.cooked');
+    const highlight = this.get('controller.searchHighlight');
+    const cooked = this.$('.cooked');
 
     if(!cooked){ return; }
 

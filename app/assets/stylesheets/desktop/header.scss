@@ -35,14 +35,10 @@ and (max-width : 570px) {
   // Common
 
   .heading {
-    border-top: 1px solid scale-color-diff();
+    border-top: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
   }
 
   // Categories
-
-  .category {
-    line-height: 20px;
-  }
 
   .btn {
     padding: 2px 8px;
@@ -58,6 +54,7 @@ and (max-width : 570px) {
   display: block;
   word-wrap: break-word;
   font-size: 11px;
+  line-height: 1.3em;
   .search-highlight {
     color: scale-color($primary, $lightness: 25%);
   }

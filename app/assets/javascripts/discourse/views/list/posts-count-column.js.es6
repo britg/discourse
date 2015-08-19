@@ -1,3 +1,5 @@
+import { fmt } from 'discourse/lib/computed';
+
 export default Ember.Object.extend({
   tagName: "td",
   ratio: function() {
@@ -11,7 +13,7 @@ export default Ember.Object.extend({
 
   title: function() {
     return I18n.messageFormat('posts_likes_MF', {
-      count: this.get('topic.posts_count'),
+      count: this.get('topic.replyCount'),
       ratio: this.get('ratioText')
     }).trim();
   }.property(),
@@ -26,6 +28,6 @@ export default Ember.Object.extend({
     return '';
   }.property(),
 
-  likesHeat: Discourse.computed.fmt('ratioText', 'heatmap-%@'),
+  likesHeat: fmt('ratioText', 'heatmap-%@'),
 });
 

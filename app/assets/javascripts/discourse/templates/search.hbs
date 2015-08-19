@@ -1,35 +1,37 @@
-{{view 'search-text-field' value=term searchContextEnabled=searchContextEnabled searchContext=searchContext id="search-term"}}
-<div class='search-context'>
+{{plugin-outlet "above-search"}}
+{{search-text-field value=term searchContextEnabled=searchContextEnabled id="search-term"}}
+
+<div class="search-context">
   {{#if searchContext}}
     <label>
-    {{input type="checkbox" name="searchContext" checked=searchContextEnabled}} {{searchContextDescription}}
+      {{input type="checkbox" name="searchContext" checked=searchContextEnabled}} {{searchContextDescription}}
     </label>
   {{/if}}
-  <a href="#" class="show-help" {{action "showSearchHelp" bubbles=false}}>{{i18n 'show_help'}}</a>
+  <a href class="show-help" {{action "showSearchHelp" bubbles=false}}>{{i18n "show_help"}}</a>
 </div>
 {{#if loading}}
-  <div class='searching'>{{loading-spinner}}</div>
+  <div class="searching">{{loading-spinner}}</div>
 {{else}}
   <div class="results">
-  {{#unless noResults}}
-    {{#each resultType in content.resultTypes}}
-      <ul>
-        <li class='heading row'>
-          {{resultType.name}}
-        </li>
-        {{view 'search-results-type' type=resultType.type displayType=resultType.displayType content=resultType.results}}
-      </ul>
-        <div class='no-results'>
-            {{#if resultType.more}}
-                <a href='#' class='filter' {{action "moreOfType" resultType.type bubbles=false}}>{{i18n 'show_more'}} <i class="fa fa-chevron-down"></i></a>
-            {{else}}
-            {{/if}}
-        </div>
-    {{/each}}
-  {{else}}
-    <div class='no-results'>
-      {{i18n 'search.no_results'}}
+  {{#if noResults}}
+    <div class="no-results">
+      {{i18n "search.no_results"}}
     </div>
-  {{/unless}}
+  {{else}}
+    {{#each content.resultTypes as |resultType|}}
+      <ul>
+        <li class="heading row">{{resultType.name}}</li>
+        {{component resultType.componentName results=resultType.results term=term}}
+      </ul>
+      <div class="no-results">
+        {{#if resultType.moreUrl}}
+          <a href="{{resultType.moreUrl}}" class="filter">{{i18n "show_more"}} {{fa-icon "chevron-down"}}</a>
+        {{/if}}
+        {{#if resultType.more}}
+          <a href class="filter filter-type" {{action "moreOfType" resultType.type bubbles=false}}>{{i18n "show_more"}} {{fa-icon "chevron-down"}}</a>
+        {{/if}}
+      </div>
+    {{/each}}
+  {{/if}}
   </div>
 {{/if}}

@@ -5,8 +5,6 @@ require_dependency 'topics_bulk_action'
 require_dependency 'discourse_event'
 
 class TopicsController < ApplicationController
-  include UrlHelper
-
   before_filter :ensure_logged_in, only: [:timings,
                                           :destroy_timings,
                                           :update,
@@ -26,11 +24,12 @@ class TopicsController < ApplicationController
                                           :bulk,
                                           :reset_new,
                                           :change_post_owners,
-                                          :bookmark]
+                                          :bookmark,
+                                          :unsubscribe]
 
   before_filter :consider_user_for_promotion, only: :show
 
-  skip_before_filter :check_xhr, only: [:show, :feed]
+  skip_before_filter :check_xhr, only: [:show, :unsubscribe, :feed]
 
   def id_for_slug
     topic = Topic.find_by(slug: params[:slug].downcase)
@@ -40,7 +39,9 @@ class TopicsController < ApplicationController
   end
 
   def show
-    flash["referer"] ||= request.referer
+    if request.referer
+      flash["referer"] ||= request.referer[0..255]
+    end
 
     # We'd like to migrate the wordpress feed to another url. This keeps up backwards compatibility with
     # existing installs.
@@ -77,9 +78,13 @@ class TopicsController < ApplicationController
       @topic_view.draft = Draft.get(current_user, @topic_view.draft_key, @topic_view.draft_sequence)
     end
 
+    unless @topic_view.topic.visible
+      response.headers['X-Robots-Tag'] = 'noindex'
+    end
+
     perform_show_response
 
-    canonical_url absolute_without_cdn(@topic_view.canonical_path)
+    canonical_url UrlHelper.absolute_without_cdn("#{Discourse.base_uri}#{@topic_view.canonical_path}")
   rescue Discourse::InvalidAccess => ex
 
     if current_user
@@ -88,6 +93,26 @@ class TopicsController < ApplicationController
     end
 
     raise ex
+  end
+
+  def unsubscribe
+    @topic_view = TopicView.new(params[:topic_id], current_user)
+
+    if slugs_do_not_match || (!request.format.json? && params[:slug].blank?)
+      return redirect_to @topic_view.topic.unsubscribe_url, status: 301
+    end
+
+    tu = TopicUser.find_by(user_id: current_user.id, topic_id: params[:topic_id])
+
+    if tu.notification_level > TopicUser.notification_levels[:regular]
+      tu.notification_level = TopicUser.notification_levels[:regular]
+    else
+      tu.notification_level = TopicUser.notification_levels[:muted]
+    end
+
+    tu.save!
+
+    perform_show_response
   end
 
   def wordpress
@@ -128,7 +153,7 @@ class TopicsController < ApplicationController
     guardian.ensure_can_edit!(topic)
 
     changes = {}
-    PostRevisor.tracked_topic_fields.keys.each do |f|
+    PostRevisor.tracked_topic_fields.each_key do |f|
       changes[f] = params[f] if params.has_key?(f)
     end
 
@@ -145,29 +170,32 @@ class TopicsController < ApplicationController
     success ? render_serialized(topic, BasicTopicSerializer) : render_json_error(topic)
   end
 
-  def similar_to
-    params.require(:title)
-    params.require(:raw)
-    title, raw = params[:title], params[:raw]
-    [:title, :raw].each { |key| check_length_of(key, params[key]) }
+  def feature_stats
+    params.require(:category_id)
+    category_id = params[:category_id].to_i
 
-    # Only suggest similar topics if the site has a minimum amount of topics present.
-    return render json: [] unless Topic.count_exceeds_minimum?
+    visible_topics = Topic.listable_topics.visible
 
-    topics = Topic.similar_to(title, raw, current_user).to_a
-    render_serialized(topics, BasicTopicSerializer)
+    render json: {
+      pinned_in_category_count: visible_topics.where(category_id: category_id).where(pinned_globally: false).where.not(pinned_at: nil).count,
+      pinned_globally_count: visible_topics.where(pinned_globally: true).where.not(pinned_at: nil).count,
+      banner_count: Topic.listable_topics.where(archetype: Archetype.banner).count,
+    }
   end
 
   def status
     params.require(:status)
     params.require(:enabled)
-    status, topic_id  = params[:status], params[:topic_id].to_i
-    enabled = (params[:enabled] == 'true')
+    params.permit(:until)
+
+    status  = params[:status]
+    topic_id = params[:topic_id].to_i
+    enabled = params[:enabled] == 'true'
 
     check_for_status_presence(:status, status)
     @topic = Topic.find_by(id: topic_id)
     guardian.ensure_can_moderate!(@topic)
-    @topic.update_status(status, enabled, current_user)
+    @topic.update_status(status, enabled, current_user, until: params[:until])
     render nothing: true
   end
 
@@ -180,14 +208,14 @@ class TopicsController < ApplicationController
   end
 
   def autoclose
-    params.permit(:auto_close_time)
+    params.permit(:auto_close_time, :timezone_offset)
     params.require(:auto_close_based_on_last_post)
 
     topic = Topic.find_by(id: params[:topic_id].to_i)
     guardian.ensure_can_moderate!(topic)
 
     topic.auto_close_based_on_last_post = params[:auto_close_based_on_last_post]
-    topic.set_auto_close(params[:auto_close_time], current_user)
+    topic.set_auto_close(params[:auto_close_time], {by_user: current_user, timezone_offset: params[:timezone_offset] ? params[:timezone_offset].to_i : nil})
 
     if topic.save
       render json: success_json.merge!({
@@ -246,6 +274,8 @@ class TopicsController < ApplicationController
     first_post = topic.ordered_posts.first
     PostDestroyer.new(current_user, first_post, { context: params[:context] }).destroy
 
+    DiscourseEvent.trigger(:topic_destroyed, topic, current_user)
+
     render nothing: true
   end
 
@@ -255,6 +285,8 @@ class TopicsController < ApplicationController
 
     first_post = topic.posts.with_deleted.order(:post_number).first
     PostDestroyer.new(current_user, first_post).recover
+
+    DiscourseEvent.trigger(:topic_recovered, topic, current_user)
 
     render nothing: true
   end
@@ -332,24 +364,15 @@ class TopicsController < ApplicationController
 
     guardian.ensure_can_change_post_owner!
 
-    post_ids = params[:post_ids].to_a
-    topic = Topic.find_by(id: params[:topic_id].to_i)
-    new_user = User.find_by(username: params[:username])
-
-    return render json: failed_json, status: 422 unless post_ids && topic && new_user
-
-    ActiveRecord::Base.transaction do
-      post_ids.each do |post_id|
-        post = Post.find(post_id)
-        # update topic owner (first avatar)
-        topic.user = new_user if post.is_first_post?
-        post.set_owner(new_user, current_user)
-      end
+    begin
+      PostOwnerChanger.new( post_ids: params[:post_ids].to_a,
+                            topic_id: params[:topic_id].to_i,
+                            new_owner: User.find_by(username: params[:username]),
+                            acting_user: current_user ).change_owner!
+      render json: success_json
+    rescue ArgumentError
+      render json: failed_json, status: 422
     end
-
-    topic.update_statistics
-
-    render json: success_json
   end
 
   def clear_pin
@@ -371,7 +394,8 @@ class TopicsController < ApplicationController
       current_user,
       params[:topic_id].to_i,
       params[:topic_time].to_i,
-      (params[:timings] || []).map{|post_number, t| [post_number.to_i, t.to_i]}
+      (params[:timings] || []).map{|post_number, t| [post_number.to_i, t.to_i]},
+      {mobile: view_context.mobile_view?}
     )
     render nothing: true
   end
@@ -429,6 +453,9 @@ class TopicsController < ApplicationController
     url << "/#{post_number}" if post_number.to_i > 0
     url << ".json" if request.format.json?
 
+    page = params[:page].to_i
+    url << "?page=#{page}" if page != 0
+
     redirect_to url, status: 301
   end
 
@@ -470,6 +497,7 @@ class TopicsController < ApplicationController
       format.html do
         @description_meta = @topic_view.topic.excerpt
         store_preloaded("topic_#{@topic_view.topic.id}", MultiJson.dump(topic_view_serializer))
+        render :show
       end
 
       format.json do
@@ -495,13 +523,8 @@ class TopicsController < ApplicationController
     topic.move_posts(current_user, post_ids_including_replies, args)
   end
 
-  def check_length_of(key, attr)
-    str = (key == :raw) ? "body" : key.to_s
-    invalid_param(key) if attr.length < SiteSetting.send("min_#{str}_similar_length")
-  end
-
   def check_for_status_presence(key, attr)
-    invalid_param(key) unless %w(pinned_globally visible closed pinned archived).include?(attr)
+    invalid_param(key) unless %w(pinned pinned_globally visible closed archived).include?(attr)
   end
 
   def invalid_param(key)

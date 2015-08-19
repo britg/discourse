@@ -1,13 +1,15 @@
 class PostSerializer < BasicPostSerializer
 
   # To pass in additional information we might need
-  INSTANCE_VARS = [:topic_view,
-                :parent_post,
-                :add_raw,
-                :single_post_link_counts,
-                :draft_sequence,
-                :post_actions,
-                :all_post_actions]
+  INSTANCE_VARS = [
+    :topic_view,
+    :parent_post,
+    :add_raw,
+    :single_post_link_counts,
+    :draft_sequence,
+    :post_actions,
+    :all_post_actions
+  ]
 
   INSTANCE_VARS.each do |v|
     self.send(:attr_accessor, v)
@@ -16,7 +18,6 @@ class PostSerializer < BasicPostSerializer
   attributes :post_number,
              :post_type,
              :updated_at,
-             :like_count,
              :reply_count,
              :reply_to_post_number,
              :quote_count,
@@ -27,7 +28,6 @@ class PostSerializer < BasicPostSerializer
              :yours,
              :topic_id,
              :topic_slug,
-             :topic_auto_close_at,
              :display_username,
              :primary_group_name,
              :version,
@@ -57,7 +57,8 @@ class PostSerializer < BasicPostSerializer
              :wiki,
              :user_custom_fields,
              :static_doc,
-             :via_email
+             :via_email,
+             :action_code
 
   def initialize(object, opts)
     super(object, opts)
@@ -70,10 +71,6 @@ class PostSerializer < BasicPostSerializer
 
   def topic_slug
     object.try(:topic).try(:slug)
-  end
-
-  def topic_auto_close_at
-    object.try(:topic).try(:auto_close_at)
   end
 
   def moderator?
@@ -184,37 +181,38 @@ class PostSerializer < BasicPostSerializer
       count_col = "#{sym}_count".to_sym
 
       count = object.send(count_col) if object.respond_to?(count_col)
-      count ||= 0
-      action_summary = {
-        id: id,
-        count: count,
-        hidden: (sym == :vote),
-        can_act: scope.post_can_act?(object, sym, taken_actions: actions)
-      }
+      summary = { id: id, count: count }
+      summary[:hidden] = true if sym == :vote
+      summary[:can_act] = true if scope.post_can_act?(object, sym, taken_actions: actions)
 
       if sym == :notify_user && scope.current_user.present? && scope.current_user == object.user
-        action_summary[:can_act] = false # Don't send a pm to yourself about your own post, silly
+        summary.delete(:can_act)
       end
 
       # The following only applies if you're logged in
-      if action_summary[:can_act] && scope.current_user.present?
-        action_summary[:can_defer_flags] = scope.is_staff? &&
-                                           PostActionType.flag_types.values.include?(id) &&
-                                           active_flags.present? && active_flags.has_key?(id) &&
-                                           active_flags[id].count > 0
+      if summary[:can_act] && scope.current_user.present?
+        summary[:can_defer_flags] = true if scope.is_staff? &&
+                                                   PostActionType.flag_types.values.include?(id) &&
+                                                   active_flags.present? && active_flags.has_key?(id) &&
+                                                   active_flags[id].count > 0
       end
 
       if actions.present? && actions.has_key?(id)
-        action_summary[:acted] = true
-        action_summary[:can_undo] = scope.can_delete?(actions[id])
+        summary[:acted] = true
+        summary[:can_undo] = true if scope.can_delete?(actions[id])
       end
 
       # only show public data
       unless scope.is_staff? || PostActionType.public_types.values.include?(id)
-        action_summary[:count] = action_summary[:acted] ? 1 : 0
+        summary[:count] = summary[:acted] ? 1 : 0
       end
 
-      result << action_summary
+      summary.delete(:count) if summary[:count] == 0
+
+      # Only include it if the user can do it or it has a count
+      if summary[:can_act] || summary[:count]
+        result << summary
+      end
     end
 
     result
@@ -273,7 +271,7 @@ class PostSerializer < BasicPostSerializer
   end
 
   def include_static_doc?
-    object.post_number == 1 && Discourse.static_doc_topic_ids.include?(object.topic_id)
+    object.is_first_post? && Discourse.static_doc_topic_ids.include?(object.topic_id)
   end
 
   def include_via_email?
@@ -284,6 +282,10 @@ class PostSerializer < BasicPostSerializer
     scope.is_staff? ? object.version : object.public_version
   end
 
+  def include_action_code?
+    object.action_code.present?
+  end
+
   private
 
     def post_actions
@@ -292,6 +294,15 @@ class PostSerializer < BasicPostSerializer
 
     def active_flags
       @active_flags ||= (@topic_view.present? && @topic_view.all_active_flags.present?) ? @topic_view.all_active_flags[object.id] : nil
+    end
+
+    def post_custom_fields
+      @post_custom_fields ||=
+        if @topic_view
+          (@topic_view.post_custom_fields && @topic_view.post_custom_fields[object.id]) || {}
+        else
+          object.custom_fields
+        end
     end
 
 end

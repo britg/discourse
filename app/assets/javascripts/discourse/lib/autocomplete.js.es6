@@ -33,10 +33,22 @@ var keys = {
 };
 
 
+let inputTimeout;
+
 export default function(options) {
   var autocompletePlugin = this;
 
   if (this.length === 0) return;
+
+  if (options === 'destroy') {
+    Ember.run.cancel(inputTimeout);
+
+    $(this).off('keypress.autocomplete')
+           .off('keydown.autocomplete')
+           .off('paste.autocomplete');
+
+    return;
+  }
 
   if (options && options.cancel && this.data("closeAutocomplete")) {
     this.data("closeAutocomplete")();
@@ -252,13 +264,13 @@ export default function(options) {
     closeAutocomplete();
   });
 
-  $(this).on('paste', function() {
+  $(this).on('paste.autocomplete', function() {
     _.delay(function(){
       me.trigger("keydown");
     }, 50);
   });
 
-  $(this).keypress(function(e) {
+  $(this).on('keypress.autocomplete', function(e) {
     var caretPosition, term;
 
     // keep hunting backwards till you hit a the @ key
@@ -277,8 +289,8 @@ export default function(options) {
     }
   });
 
-  $(this).keydown(function(e) {
-    var c, caretPosition, i, initial, next, prev, prevIsGood, stopFound, term, total, userToComplete;
+  $(this).on('keydown.autocomplete', function(e) {
+    var c, caretPosition, i, initial, prev, prevIsGood, stopFound, term, total, userToComplete;
 
     if(e.ctrlKey || e.altKey || e.metaKey){
       return true;
@@ -286,7 +298,9 @@ export default function(options) {
 
     if(options.allowAny){
       // saves us wiring up a change event as well, keypress is while its pressed
-      _.delay(function(){
+
+      Ember.run.cancel(inputTimeout);
+      inputTimeout = Ember.run.later(function(){
         if(inputSelectedItems.length === 0) {
           inputSelectedItems.push("");
         }
@@ -299,7 +313,7 @@ export default function(options) {
           }
         }
 
-      },50);
+      }, 50);
     }
 
     if (!options.key) {
@@ -308,7 +322,6 @@ export default function(options) {
     if (e.which === keys.shift) return;
     if ((completeStart === null) && e.which === keys.backSpace && options.key) {
       c = Discourse.Utilities.caretPosition(me[0]);
-      next = me[0].value[c];
       c -= 1;
       initial = c;
       prevIsGood = true;
@@ -332,7 +345,7 @@ export default function(options) {
 
     // ESC
     if (e.which === keys.esc) {
-      if (completeStart !== null) {
+      if (div !== null) {
         closeAutocomplete();
         return false;
       }

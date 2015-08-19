@@ -45,6 +45,9 @@ Sidekiq.logger.level = Logger::WARN
 
 class SidekiqLogsterReporter < Sidekiq::ExceptionHandler::Logger
   def call(ex, context = {})
+
+    return if Jobs::HandledExceptionWrapper === ex
+
     # Pass context to Logster
     fake_env = {}
     context.each do |key, value|
@@ -55,6 +58,8 @@ class SidekiqLogsterReporter < Sidekiq::ExceptionHandler::Logger
     if ex.backtrace
       Logster.add_to_env(fake_env, :backtrace, ex.backtrace)
     end
+
+    Logster.add_to_env(fake_env, :current_hostname, Discourse.current_hostname)
 
     Thread.current[Logster::Logger::LOGSTER_ENV] = fake_env
     Logster.logger.error(text)

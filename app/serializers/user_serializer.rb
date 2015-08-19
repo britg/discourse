@@ -1,6 +1,7 @@
 class UserSerializer < BasicUserSerializer
 
-  attr_accessor :omit_stats
+  attr_accessor :omit_stats,
+                :topic_post_count
 
   def self.staff_attributes(*attrs)
     attributes(*attrs)
@@ -39,6 +40,7 @@ class UserSerializer < BasicUserSerializer
              :bio_cooked,
              :created_at,
              :website,
+             :website_name,
              :profile_background,
              :card_background,
              :location,
@@ -62,7 +64,9 @@ class UserSerializer < BasicUserSerializer
              :has_title_badges,
              :edit_history_public,
              :custom_fields,
-             :user_fields
+             :user_fields,
+             :topic_post_count,
+             :pending_count
 
   has_one :invited_by, embed: :object, serializer: BasicUserSerializer
   has_many :custom_groups, embed: :object, serializer: BasicGroupSerializer
@@ -95,7 +99,8 @@ class UserSerializer < BasicUserSerializer
                      :custom_avatar_upload_id,
                      :has_title_badges,
                      :card_image_badge,
-                     :card_image_badge_id
+                     :card_image_badge_id,
+                     :muted_usernames
 
   untrusted_attributes :bio_raw,
                        :bio_cooked,
@@ -127,6 +132,26 @@ class UserSerializer < BasicUserSerializer
 
   def website
     object.user_profile.website
+  end
+
+  def website_name
+    website_host = URI(website.to_s).host rescue nil
+    discourse_host = Discourse.current_hostname
+    return if website_host.nil?
+    if website_host == discourse_host
+      # example.com == example.com
+      website_host + URI(website.to_s).path
+    elsif (website_host.split('.').length == discourse_host.split('.').length) && discourse_host.split('.').length > 2
+      # www.example.com == forum.example.com
+      website_host.split('.')[1..-1].join('.') == discourse_host.split('.')[1..-1].join('.') ? website_host + URI(website.to_s).path : website_host
+    else
+      # example.com == forum.example.com
+      discourse_host.ends_with?("." << website_host) ? website_host + URI(website.to_s).path : website_host
+    end
+  end
+
+  def include_website_name
+    website.present?
   end
 
   def card_image_badge_id
@@ -192,16 +217,7 @@ class UserSerializer < BasicUserSerializer
   end
 
   def bio_excerpt
-    # If they have a bio return it
-    excerpt = object.user_profile.bio_excerpt
-    return excerpt if excerpt.present?
-
-    # Without a bio, determine what message to show
-    if scope.user && scope.user.id == object.id
-      I18n.t('user_profile.no_info_me', username_lower: object.username_lower)
-    else
-      I18n.t('user_profile.no_info_other', name: object.name)
-    end
+    object.user_profile.bio_excerpt(350 , { keep_newlines: true, keep_emojis: true })
   end
 
   def include_suspend_reason?
@@ -252,6 +268,10 @@ class UserSerializer < BasicUserSerializer
     CategoryUser.lookup(object, :watching).pluck(:category_id)
   end
 
+  def muted_usernames
+    MutedUser.where(user_id: object.id).joins(:muted_user).pluck(:username)
+  end
+
   def include_private_message_stats?
     can_edit && !(omit_stats == true)
   end
@@ -288,6 +308,10 @@ class UserSerializer < BasicUserSerializer
     user_fields.present?
   end
 
+  def include_topic_post_count?
+    topic_post_count.present?
+  end
+
   def custom_fields
     fields = nil
 
@@ -300,5 +324,9 @@ class UserSerializer < BasicUserSerializer
     else
       {}
     end
+  end
+
+  def pending_count
+    0
   end
 end

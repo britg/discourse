@@ -1,6 +1,8 @@
+import { popupAjaxError } from 'discourse/lib/ajax-error';
 import BufferedContent from 'discourse/mixins/buffered-content';
+import { propertyNotEqual } from 'discourse/lib/computed';
 
-export default Ember.ObjectController.extend(BufferedContent, {
+export default Ember.Controller.extend(BufferedContent, {
   needs: ['admin-badges'],
   saving: false,
   savingStatus: '',
@@ -11,7 +13,7 @@ export default Ember.ObjectController.extend(BufferedContent, {
   protectedSystemFields: Em.computed.alias('controllers.admin-badges.protectedSystemFields'),
 
   readOnly: Ember.computed.alias('buffered.system'),
-  showDisplayName: Discourse.computed.propertyNotEqual('name', 'displayName'),
+  showDisplayName: propertyNotEqual('name', 'displayName'),
   canEditDescription: Em.computed.none('buffered.translatedDescription'),
 
   _resetSaving: function() {
@@ -64,11 +66,9 @@ export default Ember.ObjectController.extend(BufferedContent, {
             self.set('savingStatus', I18n.t('saved'));
           }
 
-        }).catch(function(error) {
-          self.set('savingStatus', I18n.t('failed'));
-          self.send('saveError', error);
-        }).finally(function() {
+        }).catch(popupAjaxError).finally(function() {
           self.set('saving', false);
+          self.set('savingStatus', '');
         });
       }
     },

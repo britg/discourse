@@ -56,6 +56,21 @@ class Invite < ActiveRecord::Base
   end
 
 
+  def add_groups_for_topic(topic)
+    if topic.category
+      (topic.category.groups - groups).each { |group| group.add(user) }
+    end
+  end
+
+  def self.extend_permissions(topic, user, invited_by)
+    if topic.private_message?
+      topic.grant_permission_to_user(user.email)
+    elsif topic.category && topic.category.groups.any?
+      if Guardian.new(invited_by).can_invite_to?(topic) && !SiteSetting.enable_sso
+        (topic.category.groups - user.groups).each { |group| group.add(user) }
+      end
+    end
+  end
   # Create an invite for a user, supplying an optional topic
   #
   # Return the previously existing invite if already exists. Returns nil if the invite can't be created.
@@ -64,7 +79,7 @@ class Invite < ActiveRecord::Base
     user = User.find_by(email: lower_email)
 
     if user
-      topic.grant_permission_to_user(lower_email) if topic && topic.private_message?
+      extend_permissions(topic, user, invited_by) if topic
       return nil
     end
 
@@ -92,6 +107,11 @@ class Invite < ActiveRecord::Base
       group_ids = group_ids - invite.invited_groups.pluck(:group_id)
       group_ids.each do |group_id|
         invite.invited_groups.create!(group_id: group_id)
+      end
+    else
+      if topic && topic.category # && Guardian.new(invited_by).can_invite_to?(topic)
+        group_ids = topic.category.groups.pluck(:id) - invite.invited_groups.pluck(:group_id)
+        group_ids.each { |group_id| invite.invited_groups.create!(group_id: group_id) }
       end
     end
 
@@ -142,8 +162,12 @@ class Invite < ActiveRecord::Base
           .references('user_stats')
   end
 
+  def self.find_pending_invites_from(inviter, offset=0)
+    find_all_invites_from(inviter, offset).where('invites.user_id IS NULL').order('invites.created_at DESC')
+  end
+
   def self.find_redeemed_invites_from(inviter, offset=0)
-    find_all_invites_from(inviter, offset).where('invites.user_id IS NOT NULL')
+    find_all_invites_from(inviter, offset).where('invites.user_id IS NOT NULL').order('invites.redeemed_at DESC')
   end
 
   def self.filter_by(email_or_username)

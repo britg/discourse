@@ -1,6 +1,20 @@
-const ApplicationRoute = Discourse.Route.extend({
+import { setting } from 'discourse/lib/computed';
+import showModal from 'discourse/lib/show-modal';
+import OpenComposer from "discourse/mixins/open-composer";
 
-  siteTitle: Discourse.computed.setting('title'),
+function unlessReadOnly(method) {
+  return function() {
+    if (this.site.get("isReadOnly")) {
+      bootbox.alert(I18n.t("read_only_mode.login_disabled"));
+    } else {
+      this[method]();
+    }
+  };
+}
+
+const ApplicationRoute = Discourse.Route.extend(OpenComposer, {
+
+  siteTitle: setting('title'),
 
   actions: {
     _collectTitleTokens(tokens) {
@@ -25,6 +39,11 @@ const ApplicationRoute = Discourse.Route.extend({
       this.controllerFor('topic-entrance').send('show', data);
     },
 
+    postWasEnqueued(details) {
+      const title = details.reason ? 'queue_reason.' + details.reason + '.title' : 'queue.approval.title';
+      showModal('post-enqueued', {model: details, title });
+    },
+
     composePrivateMessage(user, post) {
       const self = this;
       this.transitionTo('userActivity', user).then(function () {
@@ -35,7 +54,7 @@ const ApplicationRoute = Discourse.Route.extend({
     error(err, transition) {
       if (err.status === 404) {
         // 404
-        this.intermediateTransitionTo('unknown');
+        this.transitionTo('unknown');
         return;
       }
 
@@ -59,105 +78,62 @@ const ApplicationRoute = Discourse.Route.extend({
       this.intermediateTransitionTo('exception');
     },
 
-    showLogin() {
-      if (this.site.get("isReadOnly")) {
-        bootbox.alert(I18n.t("read_only_mode.login_disabled"));
-      } else {
-        this.handleShowLogin();
-      }
-    },
+    showLogin: unlessReadOnly('handleShowLogin'),
 
-    showCreateAccount() {
-      if (this.site.get("isReadOnly")) {
-        bootbox.alert(I18n.t("read_only_mode.login_disabled"));
-      } else {
-        this.handleShowCreateAccount();
-      }
-    },
-
-    autoLogin(modal, onFail){
-      const methods = Em.get('Discourse.LoginMethod.all');
-      if (!Discourse.SiteSettings.enable_local_logins &&
-          methods.length === 1) {
-            Discourse.Route.showModal(this, modal);
-            this.controllerFor('login').send('externalLogin', methods[0]);
-      } else {
-        onFail();
-      }
-    },
+    showCreateAccount: unlessReadOnly('handleShowCreateAccount'),
 
     showForgotPassword() {
-      Discourse.Route.showModal(this, 'forgotPassword');
+      showModal('forgotPassword', { title: 'forgot_password.title' });
     },
 
     showNotActivated(props) {
-      Discourse.Route.showModal(this, 'notActivated');
-      this.controllerFor('notActivated').setProperties(props);
+      const controller = showModal('not-activated', {title: 'log_in' });
+      controller.setProperties(props);
     },
 
     showUploadSelector(composerView) {
-      Discourse.Route.showModal(this, 'uploadSelector');
+      showModal('uploadSelector');
       this.controllerFor('upload-selector').setProperties({ composerView: composerView });
     },
 
     showKeyboardShortcutsHelp() {
-      Discourse.Route.showModal(this, 'keyboardShortcutsHelp');
+      showModal('keyboard-shortcuts-help', { title: 'keyboard_shortcuts_help.title'});
     },
 
     showSearchHelp() {
-      const self = this;
-
       // TODO: @EvitTrout how do we get a loading indicator here?
-      Discourse.ajax("/static/search_help.html", { dataType: 'html' }).then(function(html){
-        Discourse.Route.showModal(self, 'searchHelp', html);
+      Discourse.ajax("/static/search_help.html", { dataType: 'html' }).then(function(model){
+        showModal('searchHelp', { model });
       });
-
     },
 
-
-    /**
-      Close the current modal, and destroy its state.
-
-      @method closeModal
-    **/
+    // Close the current modal, and destroy its state.
     closeModal() {
-      this.render('hide-modal', {into: 'modal', outlet: 'modalBody'});
+      this.render('hide-modal', { into: 'modal', outlet: 'modalBody' });
     },
 
     /**
       Hide the modal, but keep it with all its state so that it can be shown again later.
       This is useful if you want to prompt for confirmation. hideModal, ask "Are you sure?",
-      user clicks "No", showModal. If user clicks "Yes", be sure to call closeModal.
-
-      @method hideModal
+      user clicks "No", reopenModal. If user clicks "Yes", be sure to call closeModal.
     **/
     hideModal() {
       $('#discourse-modal').modal('hide');
     },
 
-    /**
-      Show the modal. Useful after calling hideModal.
-
-      @method showModal
-    **/
-    showModal() {
+    reopenModal() {
       $('#discourse-modal').modal('show');
     },
 
     editCategory(category) {
       const self = this;
-      Discourse.Category.reloadById(category.get('id')).then(function (c) {
-        self.site.updateCategory(c);
-        Discourse.Route.showModal(self, 'editCategory', c);
+      Discourse.Category.reloadById(category.get('id')).then(function (model) {
+        self.site.updateCategory(model);
+        showModal('editCategory', { model });
         self.controllerFor('editCategory').set('selectedTab', 'general');
       });
     },
 
-    /**
-      Deletes a user and all posts and topics created by that user.
-
-      @method deleteSpammer
-    **/
     deleteSpammer: function (user) {
       this.send('closeModal');
       user.deleteAsSpammer(function() { window.location.reload(); });
@@ -165,6 +141,17 @@ const ApplicationRoute = Discourse.Route.extend({
 
     checkEmail: function (user) {
       user.checkEmail();
+    },
+
+    changeBulkTemplate(w) {
+      const controllerName = w.replace('modal/', ''),
+            factory = this.container.lookupFactory('controller:' + controllerName);
+
+      this.render(w, {into: 'modal/topic-bulk-actions', outlet: 'bulkOutlet', controller: factory ? controllerName : 'topic-bulk-actions'});
+    },
+
+    createNewTopicViaParams: function(title, body, category_id, category) {
+      this.openComposerWithParams(this.controllerFor('discovery/topics'), title, body, category_id, category);
     }
   },
 
@@ -177,26 +164,34 @@ const ApplicationRoute = Discourse.Route.extend({
   },
 
   handleShowLogin() {
-    const self = this;
-
-    if(Discourse.SiteSettings.enable_sso) {
+    if (this.siteSettings.enable_sso) {
       const returnPath = encodeURIComponent(window.location.pathname);
       window.location = Discourse.getURL('/session/sso?return_path=' + returnPath);
     } else {
-      this.send('autoLogin', 'login', function(){
-        Discourse.Route.showModal(self, 'login');
-        self.controllerFor('login').resetForm();
-      });
+      this._autoLogin('login', 'login-modal', () => this.controllerFor('login').resetForm());
     }
   },
 
   handleShowCreateAccount() {
-    const self = this;
+    if (this.siteSettings.enable_sso) {
+      const returnPath = encodeURIComponent(window.location.pathname);
+      window.location = Discourse.getURL('/session/sso?return_path=' + returnPath);
+    } else {
+      this._autoLogin('createAccount', 'create-account');
+    }
+  },
 
-    self.send('autoLogin', 'createAccount', function(){
-      Discourse.Route.showModal(self, 'createAccount');
-    });
-  }
+  _autoLogin(modal, modalClass, notAuto) {
+    const methods = Em.get('Discourse.LoginMethod.all');
+    if (!this.siteSettings.enable_local_logins && methods.length === 1) {
+      this.controllerFor('login').send('externalLogin', methods[0]);
+    } else {
+      showModal(modal);
+      this.controllerFor('modal').set('modalClass', modalClass);
+      if (notAuto) { notAuto(); }
+    }
+  },
+
 });
 
 RSVP.EventTarget.mixin(ApplicationRoute);

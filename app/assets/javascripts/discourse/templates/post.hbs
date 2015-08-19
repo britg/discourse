@@ -1,4 +1,8 @@
-{{post-gap post=this postStream=controller.postStream before="true"}}
+{{post-gap post=this postStream=controller.model.postStream before="true"}}
+
+{{#if hasTimeGap}}
+  {{time-gap daysAgo=daysSincePrevious}}
+{{/if}}
 
 <div class='row'>
   {{view 'reply-history' content=replyHistory}}
@@ -9,11 +13,11 @@
 
     <div class='topic-avatar'>
       <div class="contents">
-        {{#unboundIf userDeleted}}
+        {{#if userDeleted}}
           <i class="fa fa-trash-o deleted-user-avatar"></i>
         {{else}}
           {{raw "post/poster-avatar" post=this classNames="main-avatar"}}
-        {{/unboundIf}}
+        {{/if}}
         {{plugin-outlet "poster-avatar-bottom"}}
       </div>
     </div>
@@ -21,6 +25,7 @@
     <div class='topic-body'>
       <div class='topic-meta-data'>
         {{poster-name post=this}}
+        {{plugin-outlet "poster-name-right"}}
         <div class='post-info'>
           <a class='post-date' {{bind-attr href="shareUrl" data-share-url="shareUrl" data-post-number="post_number"}}>{{age-with-tooltip created_at}}</a>
         </div>
@@ -42,14 +47,14 @@
         {{#if wiki}}
           <div class="post-info wiki" title="{{i18n 'post.wiki.about'}}" {{action "editPost" this}}>{{fa-icon "pencil-square-o"}}</div>
         {{/if}}
-        {{#unboundIf via_email}}
+        {{#if via_email}}
           {{#if canViewRawEmail}}
             <div class="post-info via-email raw-email" title="{{i18n 'post.via_email'}}" {{action "showRawEmail" this}}>{{fa-icon "envelope-o"}}</div>
           {{else}}
             <div class="post-info via-email" title="{{i18n 'post.via_email'}}">{{fa-icon "envelope-o"}}</div>
           {{/if}}
-        {{/unboundIf}}
-        {{#unboundIf showUserReplyTab}}
+        {{/if}}
+        {{#if showUserReplyTab}}
           <a href {{action "toggleReplyHistory" this target="view"}} class='reply-to-tab'>
             {{#if loadingReplyHistory}}
               {{i18n 'loading'}}
@@ -59,7 +64,7 @@
               <span>{{reply_to_user.username}}</span>
             {{/if}}
           </a>
-        {{/unboundIf}}
+        {{/if}}
         <div {{bind-attr class=":read-state read"}} title="{{i18n 'post.unread'}}">{{fa-icon "circle"}}</div>
       </div>
 
@@ -72,6 +77,9 @@
       <div {{bind-attr class="showUserReplyTab:avoid-tab view.repliesShown::contents :regular view.extraClass"}}>
         <div class='cooked'>
           {{{cooked}}}
+          {{#if firstPost}}
+            {{plugin-outlet "topic-after-cooked"}}
+          {{/if}}
         </div>
         {{#if cooked_hidden}}
           <a href {{action "expandHidden" this}}>{{i18n 'post.show_hidden'}}</a>
@@ -83,9 +91,23 @@
             <button {{action "expandFirstPost" this}} class='btn expand-post'>{{i18n 'post.show_full'}}&hellip;</button>
           {{/if}}
         {{/if}}
-        {{view 'post-menu' post=this adminMenu=view.adminMenu}}
+
+        {{post-menu post=this
+                    canCreatePost=controller.model.details.can_create_post
+                    replyToPost="replyToPost"
+                    recoverPost="recoverPost"
+                    deletePost="deletePost"
+                    toggleLike="toggleLike"
+                    showFlags="showFlags"
+                    editPost="editPost"
+                    toggleBookmark="toggleBookmark"
+                    toggleWiki="toggleWiki"
+                    togglePostType="togglePostType"
+                    rebakePost="rebakePost"
+                    unhidePost="unhidePost"}}
       </div>
 
+      {{who-liked post=this}}
       {{#if replies}}
         <section class='embedded-posts bottom'>
           {{#each reply in replies}}
@@ -94,7 +116,7 @@
         </section>
       {{/if}}
 
-      {{discourse-action-history post=this}}
+      {{actions-summary post=this}}
       {{view 'topic-map-container' post=this topic=controller.model}}
     </div>
 
@@ -106,4 +128,5 @@
 
 </article>
 
-{{post-gap post=this postStream=controller.postStream before="false"}}
+{{post-gap post=this postStream=controller.model.postStream before="false"}}
+{{plugin-outlet "post-bottom"}}

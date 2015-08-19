@@ -13,8 +13,8 @@ a.loading-onebox {
 .onebox-result {
   margin-top: 15px;
   padding: 12px 25px 12px 12px;
-  border-left: 5px solid darken(scale-color-diff(), 10%);
-  background: scale-color-diff();
+  border-left: 5px solid dark-light-diff($primary, $secondary, 90%, -75%);
+  background-color: dark-light-diff($primary, $secondary, 97%, -65%);
   font-size: 1em;
   > .source {
     margin-bottom: 12px;
@@ -48,7 +48,7 @@ a.loading-onebox {
       margin-right: 10px;
     }
     h3, h4 {
-      margin: 0 !important;
+      margin: 0;
     }
     code {
       max-height: 400px;
@@ -82,16 +82,15 @@ a.loading-onebox {
 
 @mixin onebox-favicon($class, $image) {
   &.#{$class} .source {
-    background-image: image-url("favicons/#{$image}.png");
-    background-repeat: no-repeat;
+    background: image-url("favicons/#{$image}.png") no-repeat;
     padding-left: 20px;
   }
 }
 
 aside.onebox {
   padding: 12px 25px 12px 12px;
-  border-left: 5px solid darken(scale-color-diff(), 10%);
-  background: scale-color-diff();
+  border-left: 5px solid dark-light-diff($primary, $secondary, 90%, -75%);
+  background-color: dark-light-diff($primary, $secondary, 97%, -65%);
   font-size: 1em;
 
   header {
@@ -105,6 +104,10 @@ aside.onebox {
   @include onebox-favicon('twitterstatus', 'twitter');
   @include onebox-favicon('wikipedia', 'wikipedia');
   @include onebox-favicon('githubblob', 'github');
+  @include onebox-favicon('githubcommit', 'github');
+  @include onebox-favicon('githubpullrequest', 'github');
+  @include onebox-favicon('githubissue', 'github');
+  @include onebox-favicon('githubgist', 'github');
   @include onebox-favicon('amazon', 'amazon');
 
 
@@ -113,7 +116,7 @@ aside.onebox {
 
     h3, h4 {
       font-size: 1.17em;
-      margin: 10px 0 !important;
+      margin: 10px 0;
     }
 
     a[href] {
@@ -127,7 +130,7 @@ aside.onebox {
 
     img {
       max-height: 80%;
-      max-width: 25%;
+      max-width: 20%;
       height: auto;
       float: left;
       margin-right: 10px;
@@ -135,15 +138,17 @@ aside.onebox {
   }
 }
 
-.onebox-avatar {
-  height: 90px !important;
-  width: 90px !important;
+aside.onebox .onebox-body .onebox-avatar {
+  max-height: none;
+  max-width: none;
+  height: 90px;
+  width: 90px;
 }
 
 blockquote {
   aside.onebox {
-    background: darken(scale-color-diff(), 5%);
-    border-left: 5px solid darken(scale-color-diff(), 12%);
+    border-left: 5px solid dark-light-diff($primary, $secondary, 90%, -75%);
+    background-color: dark-light-diff($primary, $secondary, 97%, -65%);
   }
 }
 
@@ -153,7 +158,7 @@ pre.onebox code ol.lines li:before {
   display:inline-block;
   width:35px;
   left: -40px;
-  background: #F7F7F7;
+  background: dark-light-choose(#F7F7F7, #070707);
   color:#AFAFAF;
   text-align:right;
   padding-right:5px;
@@ -168,8 +173,10 @@ pre.onebox code ol{
 	margin-left:0px;
 	line-height:1.5em;
 }
+pre.onebox code {
+  background-color: dark-light-choose(#fff, #000);
+}
 pre.onebox code li{
-	background-color:#fff;
 	padding-left:5px;
 }
 
@@ -188,7 +195,7 @@ pre.onebox code ol.lines li {
 }
 
 pre.onebox code li.selected{
-	background-color:#F8EEC7
+	background-color: dark-light-choose(#F8EEC7, #541);
 }
 
 pre.onebox code {
@@ -231,4 +238,25 @@ pre.onebox code {
 
 .onebox-body .github-content-right{
   margin-left:100px;
+}
+
+//Onebox - Twitter - Status
+aside.onebox.twitterstatus .onebox-body {
+  h4 {
+    margin-bottom: 0;
+  }
+}
+.onebox.twitterstatus {
+  .thumbnail {
+    float: left;
+  }
+  p {
+    float: left;
+    white-space: pre-wrap;
+    margin-top: 5px;
+    width: 100%;
+  }
+  .date {
+    clear: left;
+  }
 }

@@ -7,8 +7,9 @@ class TopicUser < ActiveRecord::Base
 
   scope :tracking, lambda { |topic_id|
     where(topic_id: topic_id)
-        .where("COALESCE(topic_users.notification_level, :regular) >= :tracking",
-                regular: TopicUser.notification_levels[:regular], tracking: TopicUser.notification_levels[:tracking])
+   .where("COALESCE(topic_users.notification_level, :regular) >= :tracking",
+     regular: TopicUser.notification_levels[:regular],
+     tracking: TopicUser.notification_levels[:tracking])
   }
 
   # Class methods
@@ -58,13 +59,9 @@ class TopicUser < ActiveRecord::Base
 
     def create_lookup(topic_users)
       topic_users = topic_users.to_a
-
       result = {}
       return result if topic_users.blank?
-
-      topic_users.each do |ftu|
-        result[ftu.topic_id] = ftu
-      end
+      topic_users.each { |ftu| result[ftu.topic_id] = ftu }
       result
     end
 
@@ -113,10 +110,8 @@ class TopicUser < ActiveRecord::Base
       end
 
       if attrs[:notification_level]
-        MessageBus.publish("/topic/#{topic_id}",
-                         {notification_level_change: attrs[:notification_level]}, user_ids: [user_id])
+        MessageBus.publish("/topic/#{topic_id}", { notification_level_change: attrs[:notification_level] }, user_ids: [user_id])
       end
-
 
     rescue ActiveRecord::RecordNotUnique
       # In case of a race condition to insert, do nothing
@@ -127,7 +122,7 @@ class TopicUser < ActiveRecord::Base
       user_id = user.is_a?(User) ? user.id : topic
 
       now = DateTime.now
-      rows = TopicUser.where({topic_id: topic_id, user_id: user_id}).update_all({last_visited_at: now})
+      rows = TopicUser.where(topic_id: topic_id, user_id: user_id).update_all(last_visited_at: now)
       if rows == 0
         TopicUser.create(topic_id: topic_id, user_id: user_id, last_visited_at: now, first_visited_at: now)
       else
@@ -137,7 +132,7 @@ class TopicUser < ActiveRecord::Base
 
     # Update the last read and the last seen post count, but only if it doesn't exist.
     # This would be a lot easier if psql supported some kind of upsert
-    def update_last_read(user, topic_id, post_number, msecs)
+    def update_last_read(user, topic_id, post_number, msecs, opts={})
       return if post_number.blank?
       msecs = 0 if msecs.to_i < 0
 
@@ -192,11 +187,11 @@ class TopicUser < ActiveRecord::Base
         if before_last_read < post_number
           # The user read at least one new post
           TopicTrackingState.publish_read(topic_id, post_number, user.id, after)
-          user.update_posts_read!(post_number - before_last_read)
+          user.update_posts_read!(post_number - before_last_read, mobile: opts[:mobile])
         end
 
         if before != after
-          MessageBus.publish("/topic/#{topic_id}", {notification_level_change: after}, user_ids: [user.id])
+          MessageBus.publish("/topic/#{topic_id}", { notification_level_change: after }, user_ids: [user.id])
         end
       end
 
@@ -207,7 +202,8 @@ class TopicUser < ActiveRecord::Base
           args[:new_status] = notification_levels[:tracking]
         end
         TopicTrackingState.publish_read(topic_id, post_number, user.id, args[:new_status])
-        user.update_posts_read!(post_number)
+
+        user.update_posts_read!(post_number, mobile: opts[:mobile])
 
         exec_sql("INSERT INTO topic_users (user_id, topic_id, last_read_post_number, highest_seen_post_number, last_visited_at, first_visited_at, notification_level)
                   SELECT :user_id, :topic_id, :post_number, ft.highest_post_number, :now, :now, :new_status
@@ -219,7 +215,7 @@ class TopicUser < ActiveRecord::Base
                                    WHERE ftu.user_id = :user_id and ftu.topic_id = :topic_id)",
                   args)
 
-        MessageBus.publish("/topic/#{topic_id}", {notification_level_change: args[:new_status]}, user_ids: [user.id])
+        MessageBus.publish("/topic/#{topic_id}", { notification_level_change: args[:new_status] }, user_ids: [user.id])
       end
     end
 
@@ -232,6 +228,7 @@ class TopicUser < ActiveRecord::Base
 
   def self.update_post_action_cache(opts={})
     user_id = opts[:user_id]
+    post_id = opts[:post_id]
     topic_id = opts[:topic_id]
     action_type = opts[:post_action_type]
 
@@ -275,6 +272,13 @@ SQL
 
     if topic_id
       builder.where("tu2.topic_id = :topic_id", topic_id: topic_id)
+    end
+
+    if post_id
+      builder.where("tu2.topic_id IN (SELECT topic_id FROM posts WHERE id = :post_id)", post_id: post_id)
+      builder.where("tu2.user_id IN (SELECT user_id FROM post_actions
+                                     WHERE post_id = :post_id AND
+                                           post_action_type_id = :action_type_id)")
     end
 
     builder.exec(action_type_id: PostActionType.types[action_type])

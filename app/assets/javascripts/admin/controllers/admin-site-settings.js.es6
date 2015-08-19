@@ -1,19 +1,15 @@
-export default Ember.ArrayController.extend(Discourse.Presence, {
+import debounce from 'discourse/lib/debounce';
+
+export default Ember.ArrayController.extend({
   filter: null,
   onlyOverridden: false,
   filtered: Ember.computed.notEmpty('filter'),
 
-  /**
-    The list of settings based on the current filters
-
-    @property filterContent
-  **/
-  filterContent: Discourse.debounce(function() {
-
+  filterContentNow: function(category) {
     // If we have no content, don't bother filtering anything
-    if (!this.present('allSiteSettings')) return;
+    if (!!Ember.isEmpty(this.get('allSiteSettings'))) return;
 
-    var filter;
+    let filter;
     if (this.get('filter')) {
       filter = this.get('filter').toLowerCase();
     }
@@ -24,12 +20,11 @@ export default Ember.ArrayController.extend(Discourse.Presence, {
       return;
     }
 
-    var self = this,
-        matches,
-        matchesGroupedByCategory = Em.A([{nameKey: 'all_results', name: I18n.t('admin.site_settings.categories.all_results'), siteSettings: []}]);
+    const self = this,
+          matchesGroupedByCategory = [{nameKey: 'all_results', name: I18n.t('admin.site_settings.categories.all_results'), siteSettings: []}];
 
-    _.each(this.get('allSiteSettings'), function(settingsCategory) {
-      matches = settingsCategory.siteSettings.filter(function(item) {
+    this.get('allSiteSettings').forEach(function(settingsCategory) {
+      const matches = settingsCategory.siteSettings.filter(function(item) {
         if (self.get('onlyOverridden') && !item.get('overridden')) return false;
         if (filter) {
           if (item.get('setting').toLowerCase().indexOf(filter) > -1) return true;
@@ -43,19 +38,36 @@ export default Ember.ArrayController.extend(Discourse.Presence, {
       });
       if (matches.length > 0) {
         matchesGroupedByCategory[0].siteSettings.pushObjects(matches);
+        matchesGroupedByCategory.pushObject({
+          nameKey: settingsCategory.nameKey,
+          name: I18n.t('admin.site_settings.categories.' + settingsCategory.nameKey),
+          siteSettings: matches
+        });
       }
     });
 
     this.set('model', matchesGroupedByCategory);
-    this.transitionToRoute("adminSiteSettingsCategory", "all_results");
+    this.transitionToRoute("adminSiteSettingsCategory", category || "all_results");
+  },
+
+  filterContent: debounce(function() {
+    if (this.get("_skipBounce")) {
+      this.set("_skipBounce", false);
+    } else {
+      this.filterContentNow();
+    }
   }, 250).observes('filter', 'onlyOverridden'),
 
   actions: {
-    clearFilter: function() {
+    clearFilter() {
       this.setProperties({
         filter: '',
         onlyOverridden: false
       });
+    },
+
+    toggleMenu() {
+      $('.admin-detail').toggleClass('mobile-closed mobile-open');
     }
   }
 

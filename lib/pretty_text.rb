@@ -7,25 +7,31 @@ require_dependency 'post'
 module PrettyText
 
   class Helpers
-    include UrlHelper
-
     def t(key, opts)
       key = "js." + key
       unless opts
-        return I18n.t(key)
+        I18n.t(key)
       else
         str = I18n.t(key, Hash[opts.entries].symbolize_keys).dup
-        opts.each {|k,v| str.gsub!("{{#{k.to_s}}}", v.to_s) }
-        return str
+        opts.each { |k,v| str.gsub!("{{#{k.to_s}}}", v.to_s) }
+        str
       end
     end
 
-    # function here are available to v8
+    # functions here are available to v8
     def avatar_template(username)
       return "" unless username
       user = User.find_by(username_lower: username.downcase)
       return "" unless user.present?
-      schemaless absolute user.avatar_template
+
+      # TODO: Add support for ES6 and call `avatar-template` directly
+      if !user.uploaded_avatar_id
+        avatar_template = User.default_template(username)
+      else
+        avatar_template = user.avatar_template
+      end
+
+      UrlHelper.schemaless UrlHelper.absolute avatar_template
     end
 
     def is_username_valid(username)
@@ -65,16 +71,16 @@ module PrettyText
     ctx.eval("var window = {}; window.devicePixelRatio = 2;") # hack to make code think stuff is retina
     ctx.eval("var I18n = {}; I18n.t = function(a,b){ return helpers.t(a,b); }");
 
+    ctx.eval("var modules = {};")
+
     decorate_context(ctx)
 
     ctx_load(ctx,
-      "public/javascripts/highlight.pack.js",
       "vendor/assets/javascripts/better_markdown.js",
       "app/assets/javascripts/defer/html-sanitizer-bundle.js",
       "app/assets/javascripts/discourse/dialects/dialect.js",
       "app/assets/javascripts/discourse/lib/utilities.js",
-      "app/assets/javascripts/discourse/lib/html.js",
-      "app/assets/javascripts/discourse/lib/markdown.js"
+      "app/assets/javascripts/discourse/lib/markdown.js",
     )
 
     Dir["#{app_root}/app/assets/javascripts/discourse/dialects/**.js"].sort.each do |dialect|
@@ -98,13 +104,6 @@ module PrettyText
       end
     end
 
-    ctx['quoteTemplate'] = File.read("#{app_root}/app/assets/javascripts/discourse/templates/quote.hbs")
-    ctx['quoteEmailTemplate'] = File.read("#{app_root}/lib/assets/quote_email.hbs")
-    ctx.eval("HANDLEBARS_TEMPLATES = {
-      'quote': Handlebars.compile(quoteTemplate),
-      'quote_email': Handlebars.compile(quoteEmailTemplate),
-     };")
-
     ctx
   end
 
@@ -127,18 +126,38 @@ module PrettyText
   end
 
   def self.decorate_context(context)
-    context.eval("Discourse.SiteSettings = #{SiteSetting.client_settings_json};")
     context.eval("Discourse.CDN = '#{Rails.configuration.action_controller.asset_host}';")
-    context.eval("Discourse.BaseUrl = 'http://#{RailsMultisite::ConnectionManagement.current_hostname}';")
+    context.eval("Discourse.BaseUrl = '#{RailsMultisite::ConnectionManagement.current_hostname}'.replace(/:[\d]*$/,'');")
+    context.eval("Discourse.BaseUri = '#{Discourse::base_uri("/")}';")
+    context.eval("Discourse.SiteSettings = #{SiteSetting.client_settings_json};")
 
-    context.eval("Discourse.getURL = function(url) { return '#{Discourse::base_uri}' + url };")
-    context.eval("Discourse.getURLWithCDN = function(url) { url = Discourse.getURL(url); if (Discourse.CDN) { url = Discourse.CDN + url; } return url; };")
+    context.eval("Discourse.getURL = function(url) {
+      if (!url) return url;
+      if (!/^\\/[^\\/]/.test(url)) return url;
+
+      var u = (Discourse.BaseUri === undefined ? '/' : Discourse.BaseUri);
+
+      if (u[u.length-1] === '/') u = u.substring(0, u.length-1);
+      if (url.indexOf(u) !== -1) return url;
+      if (u.length > 0  && url[0] !== '/') url = '/' + url;
+
+      return u + url;
+    };")
+
+    context.eval("Discourse.getURLWithCDN = function(url) {
+      url = this.getURL(url);
+      if (Discourse.CDN && /^\\/[^\\/]/.test(url)) {
+        url = Discourse.CDN + url;
+      } else if (Discourse.S3CDN) {
+        url = url.replace(Discourse.S3BaseUrl, Discourse.S3CDN);
+      }
+      return url;
+    };")
   end
 
   def self.markdown(text, opts=nil)
     # we use the exact same markdown converter as the client
     # TODO: use the same extensions on both client and server (in particular the template for mentions)
-
     baked = nil
 
     protect do
@@ -149,7 +168,6 @@ module PrettyText
       context_opts = opts || {}
       context_opts[:sanitize] ||= true
       context['opts'] = context_opts
-
       context['raw'] = text
 
       if Post.white_listed_image_classes.present?
@@ -195,22 +213,40 @@ module PrettyText
   end
 
   def self.cook(text, opts={})
-    cloned = opts.dup
+    options = opts.dup
+
     # we have a minor inconsistency
-    cloned[:topicId] = opts[:topic_id]
-    sanitized = markdown(text.dup, cloned)
-    sanitized = add_rel_nofollow_to_user_content(sanitized) if !cloned[:omit_nofollow] && SiteSetting.add_rel_nofollow_to_user_content
-    sanitized
+    options[:topicId] = opts[:topic_id]
+
+    sanitized = markdown(text.dup, options)
+
+    doc = Nokogiri::HTML.fragment(sanitized)
+
+    if !options[:omit_nofollow] && SiteSetting.add_rel_nofollow_to_user_content
+      add_rel_nofollow_to_user_content(doc)
+    end
+
+    if SiteSetting.s3_cdn_url.present? && SiteSetting.enable_s3_uploads
+      add_s3_cdn(doc)
+    end
+
+    doc.to_html
   end
 
-  def self.add_rel_nofollow_to_user_content(html)
+  def self.add_s3_cdn(doc)
+    doc.css("img").each do |img|
+      next unless img["src"]
+      img["src"] = img["src"].sub(Discourse.store.absolute_base_url, SiteSetting.s3_cdn_url)
+    end
+  end
+
+  def self.add_rel_nofollow_to_user_content(doc)
     whitelist = []
 
     domains = SiteSetting.exclude_rel_nofollow_domains
     whitelist = domains.split('|') if domains.present?
 
     site_uri = nil
-    doc = Nokogiri::HTML.fragment(html)
     doc.css("a").each do |l|
       href = l["href"].to_s
       begin
@@ -218,8 +254,9 @@ module PrettyText
         site_uri ||= URI(Discourse.base_url)
 
         if !uri.host.present? ||
-           uri.host.ends_with?(site_uri.host) ||
-           whitelist.any?{|u| uri.host.ends_with?(u)}
+           uri.host == site_uri.host ||
+           uri.host.ends_with?("." << site_uri.host) ||
+           whitelist.any?{|u| uri.host == u || uri.host.ends_with?("." << u)}
           # we are good no need for nofollow
         else
           l["rel"] = "nofollow"
@@ -229,7 +266,6 @@ module PrettyText
         l["rel"] = "nofollow"
       end
     end
-    doc.to_html
   end
 
   class DetectedLink

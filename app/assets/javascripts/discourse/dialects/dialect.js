@@ -12,7 +12,8 @@ var parser = window.BetterMarkdown,
     initialized = false,
     emitters = [],
     hoisted,
-    preProcessors = [];
+    preProcessors = [],
+    escape = Handlebars.Utils.escapeExpression;
 
 /**
   Initialize our dialects for processing.
@@ -162,6 +163,74 @@ function hoister(t, target, replacement) {
   return t;
 }
 
+function outdent(t) {
+  return t.replace(/^([ ]{4}|\t)/gm, "");
+}
+
+function removeEmptyLines(t) {
+  return t.replace(/^\n+/, "")
+          .replace(/\s+$/, "");
+}
+
+function hideBackslashEscapedCharacters(t) {
+  return t.replace(/\\\\/g, "\u1E800")
+          .replace(/\\`/g, "\u1E8001");
+}
+
+function showBackslashEscapedCharacters(t) {
+  return t.replace(/\u1E8001/g, "\\`")
+          .replace(/\u1E800/g, "\\\\");
+}
+
+function hoistCodeBlocksAndSpans(text) {
+  // replace all "\`" with a single character
+  text = hideBackslashEscapedCharacters(text);
+
+  // /!\ the order is important /!\
+
+  // fenced code blocks (AKA GitHub code blocks)
+  text = text.replace(/(^\n*|\n)```([a-z0-9\-]*)\n([\s\S]*?)\n```/g, function(_, before, language, content) {
+    var hash = md5(content);
+    hoisted[hash] = escape(showBackslashEscapedCharacters(removeEmptyLines(content)));
+    return before + "```" + language + "\n" + hash + "\n```";
+  });
+
+  // markdown code blocks
+  text = text.replace(/(^\n*|\n\n)((?:(?:[ ]{4}|\t).*\n*)+)/g, function(match, before, content, index) {
+    // make sure we aren't in a list
+    var previousLine = text.slice(0, index).trim().match(/.*$/);
+    if (previousLine && previousLine[0].length) {
+      previousLine = previousLine[0].trim();
+      if (/^(?:\*|\+|-|\d+\.)\s+/.test(previousLine)) {
+        return match;
+      }
+    }
+    // we can safely hoist the code block
+    var hash = md5(content);
+    hoisted[hash] = escape(outdent(showBackslashEscapedCharacters(removeEmptyLines(content))));
+    return before + "    " + hash + "\n";
+  });
+
+  // <pre>...</pre> code blocks
+  text = text.replace(/(\s|^)<pre>([\s\S]*?)<\/pre>/ig, function(_, before, content) {
+    var hash = md5(content);
+    hoisted[hash] = escape(showBackslashEscapedCharacters(removeEmptyLines(content)));
+    return before + "<pre>" + hash + "</pre>";
+  });
+
+  // code spans (double & single `)
+  ["``", "`"].forEach(function(delimiter) {
+    var regexp = new RegExp("(^|[^`])" + delimiter + "([^`\\n]+?)" + delimiter + "([^`]|$)", "g");
+    text = text.replace(regexp, function(_, before, content, after) {
+      var hash = md5(content);
+      hoisted[hash] = escape(showBackslashEscapedCharacters(content.trim()));
+      return before + delimiter + hash + delimiter + after;
+    });
+  });
+
+  // replace back all weird character with "\`"
+  return showBackslashEscapedCharacters(text);
+}
 
 /**
   An object used for rendering our dialects.
@@ -183,14 +252,19 @@ Discourse.Dialect = {
   cook: function(text, opts) {
     if (!initialized) { initializeDialects(); }
 
+    dialect.options = opts;
+
     // Helps us hoist out HTML
     hoisted = {};
 
+    // pre-hoist all code-blocks/spans
+    text = hoistCodeBlocksAndSpans(text);
+
+    // pre-processors
     preProcessors.forEach(function(p) {
       text = p(text, hoister);
     });
 
-    dialect.options = opts;
     var tree = parser.toHTMLTree(text, 'Discourse'),
         result = parser.renderJsonML(parseTree(tree));
 
@@ -203,12 +277,21 @@ Discourse.Dialect = {
     // If we hoisted out anything, put it back
     var keys = Object.keys(hoisted);
     if (keys.length) {
-      keys.forEach(function(k) {
-        result = result.replace(new RegExp(k,"g"), hoisted[k]);
-      });
+      var found = true;
+
+      var unhoist = function(key) {
+        result = result.replace(new RegExp(key, "g"), function() {
+          found = true;
+          return hoisted[key];
+        });
+      };
+
+      while(found) {
+        found = false;
+        keys.forEach(unhoist);
+      }
     }
 
-    hoisted = {};
     return result.trim();
   },
 
@@ -400,7 +483,7 @@ Discourse.Dialect = {
 
   **/
   replaceBlock: function(args) {
-    this.registerBlock(args.start.toString(), function(block, next) {
+    var fn = function(block, next) {
 
       var linebreaks = dialect.options.traditional_markdown_linebreaks ||
           Discourse.SiteSettings.traditional_markdown_linebreaks;
@@ -490,7 +573,13 @@ Discourse.Dialect = {
       var emitterResult = args.emitter.call(this, contentBlocks, match, dialect.options);
       if (emitterResult) { result.push(emitterResult); }
       return result;
-    });
+    };
+
+    if (args.priority) {
+      fn.priority = args.priority;
+    }
+
+    this.registerBlock(args.start.toString(), fn);
   },
 
   /**

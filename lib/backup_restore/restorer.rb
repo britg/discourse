@@ -1,6 +1,6 @@
 module BackupRestore
 
-  class RestoreDisabledError  < RuntimeError; end
+  class RestoreDisabledError < RuntimeError; end
   class FilenameMissingError < RuntimeError; end
 
   class Restorer
@@ -50,6 +50,7 @@ module BackupRestore
       migrate_database
       reconnect_database
       reload_site_settings
+      clear_emoji_cache
 
       disable_readonly_mode
       ### READ-ONLY / END ###
@@ -73,7 +74,7 @@ module BackupRestore
     protected
 
     def ensure_restore_is_enabled
-      raise Restore::RestoreDisabledError unless Rails.env.development? || SiteSetting.allow_restore?
+      raise BackupRestore::RestoreDisabledError unless Rails.env.development? || SiteSetting.allow_restore?
     end
 
     def ensure_no_operation_is_running
@@ -88,7 +89,7 @@ module BackupRestore
     end
 
     def ensure_we_have_a_filename
-      raise Restore::FilenameMissingError if @filename.nil?
+      raise BackupRestore::FilenameMissingError if @filename.nil?
     end
 
     def initialize_state
@@ -236,7 +237,7 @@ module BackupRestore
     end
 
     def switch_schema!
-      log "Switching schemas..."
+      log "Switching schemas... try reloading the site in 5 minutes, if successful, then reboot and restore is complete."
 
       sql = [
         "BEGIN;",
@@ -265,6 +266,11 @@ module BackupRestore
     def reload_site_settings
       log "Reloading site settings..."
       SiteSetting.refresh!
+    end
+
+    def clear_emoji_cache
+      log "Clearing emoji cache..."
+      Emoji.clear_cache
     end
 
     def extract_uploads

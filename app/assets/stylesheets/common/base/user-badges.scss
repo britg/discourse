@@ -3,12 +3,10 @@
   padding: 3px 8px;
   color: $primary;
   border: 1px solid dark-light-diff($primary, $secondary, 90%, -65%);
-  font-size: $base-font-size * 0.86;
   line-height: 19px;
-  margin: 0;
   display: inline-block;
   background-color: $secondary;
-  margin-bottom: 3px;
+  margin: 0 0 3px;
 
   .fa {
     padding-right: 3px;
@@ -52,7 +50,8 @@
     }
 
     img {
-      display: inline-block;
+      display: block;
+      margin: auto auto 4px;
       width: 55px;
       height: 55px;
     }
@@ -68,7 +67,7 @@
 /* Badge listing in /badges. */
 table.badges-listing {
   margin: 20px 0;
-  border-bottom: 1px solid scale-color-diff();
+  border-bottom: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
   width: 90%;
 
   .user-badge {
@@ -113,7 +112,7 @@ table.badges-listing {
   }
 
   tr {
-    border-top: 1px solid scale-color-diff();
+    border-top: 1px solid dark-light-diff($primary, $secondary, 90%, -60%);
   }
 }
 
@@ -144,7 +143,7 @@ table.badges-listing {
   width: 45%;
   padding: 0 0 0 4%;
   margin-bottom: 20px;
-  
+
   .badge-info {
     width: 100px;
     display: block;

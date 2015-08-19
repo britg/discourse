@@ -1,7 +1,22 @@
 require 'execjs'
-require '6to5'
+require 'babel/transpiler'
 
 module Tilt
+
+  class Console
+    def initialize(prefix=nil)
+      @prefix = prefix || ''
+    end
+
+    def log(msg)
+      Rails.logger.info("#{@prefix}#{msg}")
+    end
+
+    def error(msg)
+      Rails.logger.error("#{@prefix}#{msg}")
+    end
+  end
+
   class ES6ModuleTranspilerTemplate < Tilt::Template
     self.default_mime_type = 'application/javascript'
 
@@ -15,7 +30,7 @@ module Tilt
 
     def self.create_new_context
       ctx = V8::Context.new(timeout: 5000)
-      ctx.eval("var self = this; #{File.read(ES6to5::Source.path)}")
+      ctx.eval("var self = this; #{File.read(Babel::Transpiler.script_path)}")
       ctx.eval("module = {}; exports = {};");
       ctx.load("#{Rails.root}/lib/es6_module_transpiler/support/es6-module-transpiler.js")
       ctx
@@ -64,10 +79,9 @@ module Tilt
 
       klass = self.class
       klass.protect do
+        klass.v8['console'] = Console.new("BABEL: #{scope.logical_path}: ")
         @output = klass.v8.eval(generate_source(scope))
       end
-
-      source = @output.dup
 
       # For backwards compatibility with plugins, for now export the Global format too.
       # We should eventually have an upgrade system for plugins to use ES6 or some other
@@ -90,25 +104,16 @@ module Tilt
 
           # HAX
           result = "Controller" if result == "ControllerController"
+          result = "Route" if result == "DiscourseRoute"
+          result = "View" if result == "ViewView"
+
           result.gsub!(/Mixin$/, '')
           result.gsub!(/Model$/, '')
 
-          @output << "\n\nDiscourse.#{result} = require('#{require_name}').default;\n"
+          if result != "PostMenuView"
+            @output << "\n\nDiscourse.#{result} = require('#{require_name}').default;\n"
+          end
         end
-      end
-
-      # Include JS code for JSHint
-      unless Rails.env.production?
-        if scope.pathname.to_s =~ /js\.es6/
-          extension = "js.es6"
-        elsif scope.pathname.to_s =~ /\.es6/
-          extension = "es6"
-        else
-          extension = "js"
-        end
-        req_path = "/assets/#{scope.logical_path}.#{extension}"
-
-        @output << "\nwindow.__jshintSrc = window.__jshintSrc || {}; window.__jshintSrc['#{req_path}'] = #{data.to_json};\n"
       end
 
       @output
@@ -118,7 +123,7 @@ module Tilt
 
     def generate_source(scope)
       js_source = ::JSON.generate(data, quirks_mode: true)
-      js_source = "to5.transform(#{js_source}, {ast: false, whitelist: ['es6.constants', 'es6.properties.shorthand', 'es6.arrowFunctions', 'es6.blockScoping']})['code']"
+      js_source = "babel.transform(#{js_source}, {ast: false, whitelist: ['es6.constants', 'es6.properties.shorthand', 'es6.arrowFunctions', 'es6.blockScoping', 'es6.destructuring', 'es6.spread', 'es6.parameters', 'es6.templateLiterals', 'es6.regex.unicode', 'es7.decorators']})['code']"
       "new module.exports.Compiler(#{js_source}, '#{module_name(scope.root_path, scope.logical_path)}', #{compiler_options}).#{compiler_method}()"
     end
 
